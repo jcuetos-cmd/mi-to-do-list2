@@ -222,35 +222,51 @@ footer{text-align:center;margin-top:40px;color:var(--text-h);font-size:.7rem}
   <div class="board-section" id="section-alternativos"></div>
   <div class="board-section" id="section-operaciones"></div>
 
-  <footer>Inversiones Costa Verde &middot; Los datos se guardan en tu navegador</footer>
+  <footer>Inversiones Costa Verde &middot; Base de datos compartida en tiempo real</footer>
 </div>
 
 <div class="modal-overlay" id="modalOverlay" onclick="if(event.target===this)closeModal()"><div class="modal" id="taskModal"></div></div>
 <div class="modal-overlay" id="transferOverlay" onclick="if(event.target===this)closeTransferModal()"><div class="modal" id="transferModal"></div></div>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script>
-const SK='cv-todo-v4';
-const BOARDS={liquidos:'Activos líquidos',alternativos:'Activos alternativos',operaciones:'Operaciones'};
+const SUPA_URL='https://tajrbrhwykrlmolgilvd.supabase.co';
+const SUPA_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRhanJicmh3eWtybG1vbGdpbHZkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU4MjM2MjgsImV4cCI6MjA5MTM5OTYyOH0.v3bMU8TWJV_L8OZLBF9tsy2YuchZcfrduS0M3TrOYK4';
+const sb=supabase.createClient(SUPA_URL,SUPA_KEY);
+
+const BOARDS={liquidos:'Activos l\u00edquidos',alternativos:'Activos alternativos',operaciones:'Operaciones'};
 const BP={liquidos:['Nico','Raul','Juan Pablo'],alternativos:['Nico','Paul','Ricardo','Juan'],operaciones:['Sebastian','Liss']};
-const TAGS=['Urgente','Esperando respuesta','Due diligence','Compliance','Revisión','Cierre'];
-const TC={Urgente:'tag-urgente','Esperando respuesta':'tag-esperando','Due diligence':'tag-due-diligence',Compliance:'tag-compliance','Revisión':'tag-revision',Cierre:'tag-cierre'};
+const TAGS=['Urgente','Esperando respuesta','Due diligence','Compliance','Revisi\u00f3n','Cierre'];
+const TC={Urgente:'tag-urgente','Esperando respuesta':'tag-esperando','Due diligence':'tag-due-diligence',Compliance:'tag-compliance','Revisi\u00f3n':'tag-revision',Cierre:'tag-cierre'};
 const SL={todo:'Por hacer',progress:'En progreso',done:'Hecho'};
-let tasks=load(),draggedId=null,currentTab='liquidos',selTags={liquidos:[],alternativos:[],operaciones:[]};
+let tasks=[],draggedId=null,currentTab='liquidos',selTags={liquidos:[],alternativos:[],operaciones:[]};
 
-function load(){
-  try{
-    let raw=localStorage.getItem(SK);
-    if(!raw){const old=localStorage.getItem('my-todo-tasks-v3')||localStorage.getItem('my-todo-tasks-v2');if(old){raw=old}}
-    if(!raw)return[];
-    const p=JSON.parse(raw);
-    const m=p.map(t=>({priority:5,assignee:'',deadline:'',board:'liquidos',history:[],comments:[],tags:[],progress:0,...t}));
-    localStorage.setItem(SK,JSON.stringify(m));
-    return m;
-  }catch{return[]}
+async function loadAll(){
+  const{data:rows}=await sb.from('tasks').select('*');
+  if(!rows){tasks=[];return}
+  for(const r of rows){
+    const{data:c}=await sb.from('comments').select('*').eq('task_id',r.id).order('created_at');
+    const{data:h}=await sb.from('history').select('*').eq('task_id',r.id).order('created_at');
+    r.comments=(c||[]).map(x=>({text:x.text,author:x.author,date:x.created_at}));
+    r.history=(h||[]).map(x=>({action:x.action,date:x.created_at}));
+    r.tags=r.tags||[];
+  }
+  tasks=rows;
 }
-function save(){localStorage.setItem(SK,JSON.stringify(tasks))}
+async function saveTask(t){
+  await sb.from('tasks').upsert({id:t.id,text:t.text,status:t.status,board:t.board,priority:t.priority,assignee:t.assignee,deadline:t.deadline,progress:t.progress,tags:t.tags,created_at:t.created_at,updated_at:Date.now()});
+}
+async function addHist(tid,action){
+  const now=Date.now();
+  await sb.from('history').insert({task_id:tid,action,created_at:now});
+  const t=tasks.find(x=>x.id===tid);if(t){if(!t.history)t.history=[];t.history.push({action,date:now})}
+}
+async function addCmt(tid,text,author){
+  const now=Date.now();
+  await sb.from('comments').insert({task_id:tid,text,author,created_at:now});
+  const t=tasks.find(x=>x.id===tid);if(t){if(!t.comments)t.comments=[];t.comments.push({text,author,date:now})}
+}
 function gid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,7)}
-
 function buildBoardHTML(b){
   const people=BP[b];
   let pOpts=people.map(p=>'<option>'+p+'</option>').join('');
@@ -275,118 +291,36 @@ function buildBoardHTML(b){
     }).join('')+'</div>';
 }
 
-function init(){
+
+async function init(){
   ['liquidos','alternativos','operaciones'].forEach(b=>{
     document.getElementById('section-'+b).innerHTML=buildBoardHTML(b);
     document.getElementById('taskInput-'+b).addEventListener('keydown',e=>{if(e.key==='Enter')addTask(b)});
   });
   document.querySelectorAll('.tag-option').forEach(el=>{
-    el.onclick=function(){
-      const b=this.dataset.board,t=this.dataset.tag;
-      this.classList.toggle('selected');
-      const i=selTags[b].indexOf(t);
-      if(i>-1)selTags[b].splice(i,1);else selTags[b].push(t);
-    };
+    el.onclick=function(){const b=this.dataset.board,t=this.dataset.tag;this.classList.toggle('selected');const i=selTags[b].indexOf(t);if(i>-1)selTags[b].splice(i,1);else selTags[b].push(t)};
   });
-  renderAll();
+  await loadAll();renderAll();
+  setInterval(async()=>{await loadAll();renderAll()},10000);
 }
+function switchTab(tab){currentTab=tab;document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));document.getElementById('tab-'+tab).classList.add('active');document.querySelectorAll('.board-section,.dashboard').forEach(s=>s.classList.remove('active'));const sec=document.getElementById('section-'+tab);if(sec)sec.classList.add('active');if(tab==='dashboard')renderDashboard();else{const inp=document.getElementById('taskInput-'+tab);if(inp)inp.focus()}}
 
-function switchTab(tab){
-  currentTab=tab;
-  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
-  document.getElementById('tab-'+tab).classList.add('active');
-  document.querySelectorAll('.board-section,.dashboard').forEach(s=>s.classList.remove('active'));
-  const sec=document.getElementById('section-'+tab);if(sec)sec.classList.add('active');
-  if(tab==='dashboard')renderDashboard();
-  else{const inp=document.getElementById('taskInput-'+tab);if(inp)inp.focus()}
+async function addTask(b){
+  const inp=document.getElementById('taskInput-'+b);const text=inp.value.trim();if(!text)return;
+  const t={id:gid(),text,status:'todo',board:b,priority:parseInt(document.getElementById('priorityInput-'+b).value)||5,assignee:document.getElementById('assigneeInput-'+b).value,deadline:document.getElementById('deadlineInput-'+b).value||'',tags:[...selTags[b]],comments:[],history:[],progress:0,created_at:Date.now()};
+  tasks.push(t);await saveTask(t);await addHist(t.id,'Creada');renderAll();
+  inp.value='';document.getElementById('assigneeInput-'+b).value='';document.getElementById('deadlineInput-'+b).value='';document.getElementById('priorityInput-'+b).value='5';
+  selTags[b]=[];document.querySelectorAll('#tags-'+b+' .tag-option').forEach(x=>x.classList.remove('selected'));inp.focus();
 }
-
-function addTask(b){
-  const inp=document.getElementById('taskInput-'+b);
-  const text=inp.value.trim();if(!text)return;
-  tasks.push({id:gid(),text,status:'todo',board:b,
-    priority:parseInt(document.getElementById('priorityInput-'+b).value)||5,
-    assignee:document.getElementById('assigneeInput-'+b).value,
-    deadline:document.getElementById('deadlineInput-'+b).value||'',
-    tags:[...selTags[b]],comments:[],progress:0,
-    createdAt:Date.now(),history:[{action:'Creada',date:Date.now()}]
-  });
-  save();renderAll();
-  inp.value='';document.getElementById('assigneeInput-'+b).value='';
-  document.getElementById('deadlineInput-'+b).value='';document.getElementById('priorityInput-'+b).value='5';
-  selTags[b]=[];document.querySelectorAll('#tags-'+b+' .tag-option').forEach(t=>t.classList.remove('selected'));
-  inp.focus();
-}
-
-function deleteTask(id){tasks=tasks.filter(t=>t.id!==id);save();renderAll()}
-
-function moveTask(id,ns){
-  const t=tasks.find(x=>x.id===id);if(!t)return;
-  t.history.push({action:'Movida a '+SL[ns],date:Date.now()});
-  t.status=ns;
-  if(ns==='done')t.progress=100;
-  save();renderAll();
-}
-
-function openTransferModal(id,nb){
-  const t=tasks.find(x=>x.id===id);if(!t)return;
-  const m=document.getElementById('transferModal');
-  let pOpts='<option value="">Sin asignar</option>'+BP[nb].map(p=>'<option>'+esc(p)+'</option>').join('');
-  m.innerHTML='<button class="modal-close" onclick="closeTransferModal()">&#10005;</button>'+
-    '<div class="modal-title">Transferir tarea</div>'+
-    '<div class="modal-board">&rarr; '+BOARDS[nb]+'</div>'+
-    '<div class="transfer-form">'+
-    '<div><label>Nombre de la tarea</label><input type="text" id="transferName" value="'+esc(t.text)+'"></div>'+
-    '<div><label>Nuevo responsable</label><select id="transferAssignee">'+pOpts+'</select></div>'+
-    '<div><label>Nuevo plazo</label><input type="date" id="transferDeadline"></div>'+
-    '<div><label>Comentario (opcional)</label><textarea id="transferComment" placeholder="Contexto para el nuevo equipo..."></textarea></div>'+
-    '<div class="transfer-actions"><button class="btn-cancel" onclick="closeTransferModal()">Cancelar</button>'+
-    '<button class="btn-confirm-transfer" onclick="confirmTransfer(\''+id+'\',\''+nb+'\')">Transferir</button></div></div>';
-  document.getElementById('transferOverlay').classList.add('open');
-}
+async function deleteTask(id){await sb.from('tasks').delete().eq('id',id);tasks=tasks.filter(t=>t.id!==id);renderAll()}
+async function moveTask(id,ns){const t=tasks.find(x=>x.id===id);if(!t)return;t.status=ns;if(ns==='done')t.progress=100;await saveTask(t);await addHist(id,'Movida a '+SL[ns]);renderAll()}
+async function openTransferModal(id,nb){const t=tasks.find(x=>x.id===id);if(!t)return;const m=document.getElementById('transferModal');let pOpts='<option value="">Sin asignar</option>'+BP[nb].map(p=>'<option>'+esc(p)+'</option>').join('');m.innerHTML='<button class="modal-close" onclick="closeTransferModal()">&#10005;</button><div class="modal-title">Transferir tarea</div><div class="modal-board">&rarr; '+BOARDS[nb]+'</div><div class="transfer-form"><div><label>Nombre de la tarea</label><input type="text" id="transferName" value="'+esc(t.text)+'"></div><div><label>Nuevo responsable</label><select id="transferAssignee">'+pOpts+'</select></div><div><label>Nuevo plazo</label><input type="date" id="transferDeadline"></div><div><label>Comentario (opcional)</label><textarea id="transferComment" placeholder="Contexto para el nuevo equipo..."></textarea></div><div class="transfer-actions"><button class="btn-cancel" onclick="closeTransferModal()">Cancelar</button><button class="btn-confirm-transfer" onclick="confirmTransfer(\''+id+'\',\''+nb+'\')">Transferir</button></div></div>';document.getElementById('transferOverlay').classList.add('open')}
 function closeTransferModal(){document.getElementById('transferOverlay').classList.remove('open')}
-function confirmTransfer(id,nb){
-  const t=tasks.find(x=>x.id===id);if(!t)return;
-  const name=document.getElementById('transferName').value.trim();
-  const assignee=document.getElementById('transferAssignee').value;
-  const deadline=document.getElementById('transferDeadline').value;
-  const comment=document.getElementById('transferComment').value.trim();
-  t.history.push({action:'Transferida de '+BOARDS[t.board]+' a '+BOARDS[nb],date:Date.now()});
-  if(comment){if(!t.comments)t.comments=[];t.comments.push({text:comment,date:Date.now(),author:t.assignee||'Sistema'});t.history.push({action:'Comentario de transferencia',date:Date.now()})}
-  if(name)t.text=name;
-  t.board=nb;t.status='todo';t.progress=0;
-  if(assignee)t.assignee=assignee;
-  if(deadline)t.deadline=deadline;
-  save();closeTransferModal();switchTab(nb);renderAll();
-}
+async function confirmTransfer(id,nb){const t=tasks.find(x=>x.id===id);if(!t)return;const name=document.getElementById('transferName').value.trim();const assignee=document.getElementById('transferAssignee').value;const deadline=document.getElementById('transferDeadline').value;const comment=document.getElementById('transferComment').value.trim();const oldBoard=t.board;if(name)t.text=name;t.board=nb;t.status='todo';t.progress=0;if(assignee)t.assignee=assignee;if(deadline)t.deadline=deadline;await saveTask(t);await addHist(id,'Transferida de '+BOARDS[oldBoard]+' a '+BOARDS[nb]);if(comment){await addCmt(id,comment,t.assignee||'Sistema');await addHist(id,'Comentario de transferencia')}closeTransferModal();switchTab(nb);renderAll()}
 
-function addComment(id){
-  const inp=document.getElementById('commentInput-'+id);if(!inp)return;
-  const text=inp.value.trim();if(!text)return;
-  const t=tasks.find(x=>x.id===id);if(!t)return;
-  if(!t.comments)t.comments=[];
-  t.comments.push({text,date:Date.now(),author:t.assignee||'Anónimo'});
-  t.history.push({action:'Comentario agregado',date:Date.now()});
-  save();openModal(id);renderAll();
-}
-function addCardComment(id){
-  const inp=document.getElementById('cardComment-'+id);if(!inp)return;
-  const text=inp.value.trim();if(!text)return;
-  const t=tasks.find(x=>x.id===id);if(!t)return;
-  if(!t.comments)t.comments=[];
-  t.comments.push({text,date:Date.now(),author:t.assignee||'Anónimo'});
-  t.history.push({action:'Comentario agregado',date:Date.now()});
-  save();renderAll();
-}
-function updateProgress(id,val){
-  const t=tasks.find(x=>x.id===id);if(!t)return;
-  const nv=parseInt(val);
-  if(t.status==='done'&&nv<100)return;
-  const old=t.progress||0;t.progress=nv;
-  if(old!==nv)t.history.push({action:'Avance: '+old+'% → '+nv+'%',date:Date.now()});
-  save();renderAll();
-}
-
+async function addComment(id){const inp=document.getElementById('commentInput-'+id);if(!inp)return;const text=inp.value.trim();if(!text)return;const t=tasks.find(x=>x.id===id);if(!t)return;await addCmt(id,text,t.assignee||'An\u00f3nimo');await addHist(id,'Comentario agregado');openModal(id);renderAll()}
+async function addCardComment(id){const inp=document.getElementById('cardComment-'+id);if(!inp)return;const text=inp.value.trim();if(!text)return;const t=tasks.find(x=>x.id===id);if(!t)return;await addCmt(id,text,t.assignee||'An\u00f3nimo');await addHist(id,'Comentario agregado');renderAll()}
+async function updateProgress(id,val){const t=tasks.find(x=>x.id===id);if(!t)return;const nv=parseInt(val);if(t.status==='done'&&nv<100)return;const old=t.progress||0;t.progress=nv;await saveTask(t);if(old!==nv)await addHist(id,'Avance: '+old+'% \u2192 '+nv+'%');renderAll()}
 function getNext(s){return s==='todo'?'progress':s==='progress'?'done':null}
 function getPrev(s){return s==='done'?'progress':s==='progress'?'todo':null}
 function priClass(p){return p>=8?'pri-high':p>=4?'pri-med':'pri-low'}
