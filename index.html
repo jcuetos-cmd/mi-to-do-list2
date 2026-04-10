@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mi To-Do List</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Fraunces:wght@600;700&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+
+:root {
+  --bg: #F6F1EB;
+  --surface: #FFFFFF;
+  --text: #2C2418;
+  --text-soft: #7A6F60;
+  --accent: #D4622B;
+  --accent-hover: #B8511F;
+  --todo-bg: #FFF8F0;
+  --todo-border: #F0D9C4;
+  --todo-dot: #E8A76C;
+  --progress-bg: #F0F4FF;
+  --progress-border: #C4D4F0;
+  --progress-dot: #6C8FE8;
+  --done-bg: #EEFBF3;
+  --done-border: #B4E6C8;
+  --done-dot: #3DAB6A;
+  --shadow: 0 1px 3px rgba(44,36,24,0.06), 0 6px 16px rgba(44,36,24,0.04);
+  --shadow-lg: 0 4px 12px rgba(44,36,24,0.08), 0 16px 40px rgba(44,36,24,0.06);
+  --radius: 14px;
+  --font-body: 'DM Sans', sans-serif;
+  --font-display: 'Fraunces', serif;
+}
+
+body {
+  font-family: var(--font-body);
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  padding: 24px 16px 60px;
+}
+
+/* --- Subtle background texture --- */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image: radial-gradient(circle at 1px 1px, rgba(44,36,24,0.03) 1px, transparent 0);
+  background-size: 32px 32px;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.app { max-width: 1100px; margin: 0 auto; position: relative; z-index: 1; }
+
+/* --- Header --- */
+header {
+  text-align: center;
+  margin-bottom: 32px;
+}
+
+header h1 {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 2.2rem;
+  color: var(--text);
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+
+header p {
+  color: var(--text-soft);
+  font-size: 0.95rem;
+  margin-top: 6px;
+}
+
+/* --- New task bar --- */
+.new-task-bar {
+  display: flex;
+  gap: 10px;
+  max-width: 540px;
+  margin: 0 auto 36px;
+}
+
+.new-task-bar input {
+  flex: 1;
+  padding: 14px 18px;
+  border: 2px solid transparent;
+  border-radius: var(--radius);
+  background: var(--surface);
+  font-family: var(--font-body);
+  font-size: 1rem;
+  color: var(--text);
+  box-shadow: var(--shadow);
+  outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.new-task-bar input::placeholder { color: var(--text-soft); opacity: 0.6; }
+.new-task-bar input:focus {
+  border-color: var(--accent);
+  box-shadow: var(--shadow), 0 0 0 3px rgba(212,98,43,0.12);
+}
+
+.new-task-bar button {
+  padding: 14px 24px;
+  border: none;
+  border-radius: var(--radius);
+  background: var(--accent);
+  color: #fff;
+  font-family: var(--font-body);
+  font-weight: 600;
+  font-size: 0.95rem;
+  cursor: pointer;
+  transition: background 0.2s, transform 0.1s;
+  white-space: nowrap;
+}
+
+.new-task-bar button:hover { background: var(--accent-hover); }
+.new-task-bar button:active { transform: scale(0.97); }
+
+/* --- Columns layout --- */
+.board {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+
+@media (max-width: 720px) {
+  .board { grid-template-columns: 1fr; }
+}
+
+.column {
+  background: var(--surface);
+  border-radius: 18px;
+  padding: 20px 16px 24px;
+  box-shadow: var(--shadow);
+  min-height: 200px;
+  transition: box-shadow 0.2s;
+}
+
+.column.drag-over { box-shadow: var(--shadow-lg); }
+
+.column-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 2px solid var(--bg);
+}
+
+.column-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.column-header h2 {
+  font-family: var(--font-body);
+  font-weight: 700;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-soft);
+}
+
+.column-count {
+  margin-left: auto;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-soft);
+  background: var(--bg);
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Column color accents */
+.col-todo .column-dot { background: var(--todo-dot); }
+.col-progress .column-dot { background: var(--progress-dot); }
+.col-done .column-dot { background: var(--done-dot); }
+
+/* --- Task cards --- */
+.task-list { display: flex; flex-direction: column; gap: 10px; min-height: 40px; }
+
+.task-card {
+  padding: 14px 16px;
+  border-radius: 12px;
+  border: 1.5px solid transparent;
+  cursor: grab;
+  transition: transform 0.15s, box-shadow 0.15s, opacity 0.15s;
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.task-card:active { cursor: grabbing; }
+.task-card:hover { transform: translateY(-1px); box-shadow: var(--shadow); }
+.task-card.dragging { opacity: 0.4; transform: scale(0.96); }
+
+.col-todo .task-card { background: var(--todo-bg); border-color: var(--todo-border); }
+.col-progress .task-card { background: var(--progress-bg); border-color: var(--progress-border); }
+.col-done .task-card { background: var(--done-bg); border-color: var(--done-border); }
+.col-done .task-card .task-text { text-decoration: line-through; color: var(--text-soft); }
+
+.task-text {
+  flex: 1;
+  font-size: 0.95rem;
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+.task-actions {
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 0.15s;
+  flex-shrink: 0;
+}
+
+.task-card:hover .task-actions { opacity: 1; }
+
+.task-actions button {
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 8px;
+  background: rgba(44,36,24,0.06);
+  color: var(--text-soft);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.85rem;
+  transition: background 0.15s, color 0.15s;
+}
+
+.task-actions button:hover {
+  background: rgba(44,36,24,0.12);
+  color: var(--text);
+}
+
+.task-actions button.btn-delete:hover {
+  background: rgba(212,98,43,0.15);
+  color: var(--accent);
+}
+
+/* --- Empty state --- */
+.empty-state {
+  text-align: center;
+  padding: 20px 10px;
+  color: var(--text-soft);
+  font-size: 0.85rem;
+  opacity: 0.6;
+}
+
+/* --- Entry animation --- */
+@keyframes slideIn {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.task-card.new { animation: slideIn 0.25s ease-out; }
+
+/* --- Footer --- */
+footer {
+  text-align: center;
+  margin-top: 48px;
+  color: var(--text-soft);
+  font-size: 0.8rem;
+  opacity: 0.5;
+}
+</style>
+</head>
+<body>
+
+<div class="app">
+  <header>
+    <h1>Mi To-Do List</h1>
+    <p>Arrastra las tareas entre columnas para cambiar su estado</p>
+  </header>
+
+  <div class="new-task-bar">
+    <input type="text" id="taskInput" placeholder="Escribe una nueva tarea..." autofocus>
+    <button onclick="addTask()">Agregar</button>
+  </div>
+
+  <div class="board">
+    <!-- Por hacer -->
+    <div class="column col-todo" data-status="todo" ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onDrop(event)">
+      <div class="column-header">
+        <div class="column-dot"></div>
+        <h2>Por hacer</h2>
+        <div class="column-count" id="count-todo">0</div>
+      </div>
+      <div class="task-list" id="list-todo"></div>
+    </div>
+
+    <!-- En progreso -->
+    <div class="column col-progress" data-status="progress" ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onDrop(event)">
+      <div class="column-header">
+        <div class="column-dot"></div>
+        <h2>En progreso</h2>
+        <div class="column-count" id="count-progress">0</div>
+      </div>
+      <div class="task-list" id="list-progress"></div>
+    </div>
+
+    <!-- Hecho -->
+    <div class="column col-done" data-status="done" ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onDrop(event)">
+      <div class="column-header">
+        <div class="column-dot"></div>
+        <h2>Hecho</h2>
+        <div class="column-count" id="count-done">0</div>
+      </div>
+      <div class="task-list" id="list-done"></div>
+    </div>
+  </div>
+
+  <footer>Los datos se guardan en tu navegador</footer>
+</div>
+
+<script>
+const STORAGE_KEY = 'my-todo-tasks';
+
+let tasks = loadTasks();
+let draggedId = null;
+
+function loadTasks() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch { return []; }
+}
+
+function saveTasks() {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks));
+}
+
+function generateId() {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+}
+
+function addTask() {
+  const input = document.getElementById('taskInput');
+  const text = input.value.trim();
+  if (!text) return;
+
+  tasks.push({ id: generateId(), text, status: 'todo', createdAt: Date.now() });
+  saveTasks();
+  renderAll();
+  input.value = '';
+  input.focus();
+
+  // Animate the new card
+  const list = document.getElementById('list-todo');
+  const first = list.firstElementChild;
+  if (first) first.classList.add('new');
+}
+
+function deleteTask(id) {
+  tasks = tasks.filter(t => t.id !== id);
+  saveTasks();
+  renderAll();
+}
+
+function moveTask(id, newStatus) {
+  const task = tasks.find(t => t.id === id);
+  if (task) { task.status = newStatus; saveTasks(); renderAll(); }
+}
+
+function getNextStatus(current) {
+  if (current === 'todo') return 'progress';
+  if (current === 'progress') return 'done';
+  return null;
+}
+
+function getPrevStatus(current) {
+  if (current === 'done') return 'progress';
+  if (current === 'progress') return 'todo';
+  return null;
+}
+
+function createTaskCard(task) {
+  const card = document.createElement('div');
+  card.className = 'task-card';
+  card.draggable = true;
+  card.dataset.id = task.id;
+
+  card.addEventListener('dragstart', e => {
+    draggedId = task.id;
+    card.classList.add('dragging');
+    e.dataTransfer.effectAllowed = 'move';
+  });
+
+  card.addEventListener('dragend', () => {
+    card.classList.remove('dragging');
+    draggedId = null;
+    document.querySelectorAll('.column').forEach(c => c.classList.remove('drag-over'));
+  });
+
+  const next = getNextStatus(task.status);
+  const prev = getPrevStatus(task.status);
+
+  let actionsHTML = '';
+  if (prev) actionsHTML += `<button title="Mover atrás" onclick="moveTask('${task.id}','${prev}')">&#8592;</button>`;
+  if (next) actionsHTML += `<button title="Avanzar" onclick="moveTask('${task.id}','${next}')">&#8594;</button>`;
+  actionsHTML += `<button class="btn-delete" title="Eliminar" onclick="deleteTask('${task.id}')">&#10005;</button>`;
+
+  card.innerHTML = `
+    <span class="task-text">${escapeHTML(task.text)}</span>
+    <div class="task-actions">${actionsHTML}</div>
+  `;
+
+  return card;
+}
+
+function escapeHTML(str) {
+  const d = document.createElement('div');
+  d.textContent = str;
+  return d.innerHTML;
+}
+
+function renderAll() {
+  ['todo', 'progress', 'done'].forEach(status => {
+    const list = document.getElementById('list-' + status);
+    const filtered = tasks.filter(t => t.status === status);
+
+    list.innerHTML = '';
+    if (filtered.length === 0) {
+      list.innerHTML = '<div class="empty-state">Sin tareas aquí</div>';
+    } else {
+      filtered.forEach(t => list.appendChild(createTaskCard(t)));
+    }
+
+    document.getElementById('count-' + status).textContent = filtered.length;
+  });
+}
+
+// Drag & drop handlers
+function onDragOver(e) {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  const col = e.currentTarget;
+  col.classList.add('drag-over');
+}
+
+function onDragLeave(e) {
+  e.currentTarget.classList.remove('drag-over');
+}
+
+function onDrop(e) {
+  e.preventDefault();
+  const col = e.currentTarget;
+  col.classList.remove('drag-over');
+  const newStatus = col.dataset.status;
+  if (draggedId && newStatus) {
+    moveTask(draggedId, newStatus);
+  }
+}
+
+// Enter key to add task
+document.getElementById('taskInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') addTask();
+});
+
+// Touch support for mobile drag
+let touchTask = null;
+let touchClone = null;
+
+document.addEventListener('touchstart', e => {
+  const card = e.target.closest('.task-card');
+  if (!card) return;
+  touchTask = card.dataset.id;
+}, { passive: true });
+
+// Initial render
+renderAll();
+</script>
+</body>
+</html>
