@@ -124,6 +124,20 @@ header p{color:var(--text-s);font-size:.85rem;margin-top:2px}
 .btn-finish:hover{background:var(--red-l);border-color:var(--red)}
 
 .empty-state{text-align:center;padding:20px 10px;color:var(--text-h);font-size:.78rem}
+
+.progress-row{display:flex;align-items:center;gap:7px;margin-top:6px}
+.progress-bar-bg{flex:1;height:5px;background:var(--border-l);border-radius:3px;overflow:hidden}
+.progress-bar-fill{height:100%;border-radius:3px;transition:width .3s}
+.progress-bar-fill.low{background:var(--red)}.progress-bar-fill.mid{background:var(--orange)}.progress-bar-fill.high{background:var(--blue)}.progress-bar-fill.full{background:var(--green)}
+.progress-label{font-size:.68rem;font-weight:600;color:var(--text-h);min-width:32px;text-align:right}
+.progress-select{padding:2px 4px;border:1px solid var(--border);border-radius:4px;font-size:.68rem;font-family:var(--font);color:var(--text-s);background:var(--surface);cursor:pointer;outline:none}
+.progress-select:focus{border-color:var(--blue)}
+
+.card-comment-row{display:flex;gap:5px;margin-top:6px}
+.card-comment-row input{flex:1;padding:5px 8px;border:1px solid var(--border-l);border-radius:5px;font-family:var(--font);font-size:.72rem;color:var(--text);outline:none;background:var(--bg)}
+.card-comment-row input:focus{border-color:var(--blue);background:var(--surface)}
+.card-comment-row button{padding:5px 10px;border:none;border-radius:5px;background:var(--blue);color:#fff;font-family:var(--font);font-size:.68rem;font-weight:500;cursor:pointer}
+.card-comment-row button:hover{background:var(--blue-d)}
 @keyframes slideIn{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:translateY(0)}}
 .task-card.new{animation:slideIn .2s ease-out}
 
@@ -149,6 +163,17 @@ header p{color:var(--text-s);font-size:.85rem;margin-top:2px}
 .comment-input-row button{padding:9px 16px;border:none;border-radius:var(--rs);background:var(--blue);color:#fff;font-family:var(--font);font-weight:500;font-size:.8rem;cursor:pointer}
 .modal-close{position:absolute;top:16px;right:16px;width:32px;height:32px;border:none;border-radius:50%;background:transparent;font-size:1.1rem;color:var(--text-h);cursor:pointer;display:flex;align-items:center;justify-content:center}
 .modal-close:hover{background:var(--bg)}
+
+.transfer-form{display:flex;flex-direction:column;gap:12px;margin-top:16px}
+.transfer-form label{font-size:.78rem;font-weight:500;color:var(--text-s);margin-bottom:2px;display:block}
+.transfer-form select,.transfer-form input,.transfer-form textarea{width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:var(--rs);font-family:var(--font);font-size:.85rem;color:var(--text);outline:none}
+.transfer-form select:focus,.transfer-form input:focus,.transfer-form textarea:focus{border-color:var(--blue)}
+.transfer-form textarea{resize:vertical;min-height:60px}
+.transfer-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:4px}
+.btn-cancel{padding:9px 18px;border:1px solid var(--border);border-radius:var(--rs);background:var(--surface);font-family:var(--font);font-size:.82rem;font-weight:500;color:var(--text-s);cursor:pointer}
+.btn-cancel:hover{background:var(--bg)}
+.btn-confirm-transfer{padding:9px 18px;border:none;border-radius:var(--rs);background:var(--blue);color:#fff;font-family:var(--font);font-size:.82rem;font-weight:500;cursor:pointer}
+.btn-confirm-transfer:hover{background:var(--blue-d)}
 
 .dashboard{display:none;max-width:900px;margin:0 auto}
 .dashboard.active{display:block}
@@ -333,6 +358,10 @@ footer{text-align:center;margin-top:40px;color:var(--text-h);font-size:.72rem}
   <div class="modal" style="position:relative" id="taskModal"></div>
 </div>
 
+<div class="modal-overlay" id="transferOverlay" onclick="if(event.target===this)closeTransferModal()">
+  <div class="modal" style="position:relative" id="transferModal"></div>
+</div>
+
 <script>
 const STORAGE_KEY='my-todo-tasks-v3';
 const BOARDS={liquidos:'Activos líquidos',alternativos:'Activos alternativos',operaciones:'Operaciones'};
@@ -352,7 +381,7 @@ function loadTasks(){
     const raw=localStorage.getItem(STORAGE_KEY)||(old||null);
     if(!raw)return[];
     const parsed=JSON.parse(raw);
-    const migrated=parsed.map(t=>({priority:5,assignee:'',deadline:'',board:'liquidos',history:[],comments:[],tags:[],...t}));
+    const migrated=parsed.map(t=>({priority:5,assignee:'',deadline:'',board:'liquidos',history:[],comments:[],tags:[],progress:0,...t}));
     if(old&&!localStorage.getItem(STORAGE_KEY)){localStorage.setItem(STORAGE_KEY,JSON.stringify(migrated));localStorage.removeItem('my-todo-tasks-v2')}
     return migrated;
   }catch{return[]}
@@ -400,7 +429,7 @@ function addTask(board){
     assignee:document.getElementById('assigneeInput-'+board).value,
     deadline:document.getElementById('deadlineInput-'+board).value||'',
     tags:[...selectedTags[board]],
-    comments:[],
+    comments:[],progress:0,
     createdAt:Date.now(),
     history:[{action:'Creada',date:Date.now()}]
   });
@@ -421,9 +450,58 @@ function moveTask(id,newStatus){
   if(t){t.history.push({action:'Movida a '+STATUS_LABELS[newStatus],date:Date.now()});t.status=newStatus;save();renderAll()}
 }
 
+function openTransferModal(id,newBoard){
+  const t=tasks.find(x=>x.id===id);if(!t)return;
+  const m=document.getElementById('transferModal');
+  let peopleOpts='<option value="">Sin asignar</option>';
+  BOARD_PEOPLE[newBoard].forEach(p=>{peopleOpts+='<option value="'+p+'">'+esc(p)+'</option>'});
+
+  m.innerHTML='<button class="modal-close" onclick="closeTransferModal()">&#10005;</button>'+
+    '<div class="modal-title">Transferir tarea</div>'+
+    '<div class="modal-board">"'+esc(t.text)+'" &rarr; '+BOARDS[newBoard]+'</div>'+
+    '<div class="transfer-form">'+
+      '<div><label>Nuevo responsable</label><select id="transferAssignee">'+peopleOpts+'</select></div>'+
+      '<div><label>Nuevo plazo</label><input type="date" id="transferDeadline"></div>'+
+      '<div><label>Comentario (opcional)</label><textarea id="transferComment" placeholder="Contexto para el nuevo equipo..."></textarea></div>'+
+      '<div class="transfer-actions">'+
+        '<button class="btn-cancel" onclick="closeTransferModal()">Cancelar</button>'+
+        '<button class="btn-confirm-transfer" onclick="confirmTransfer(\''+id+'\',\''+newBoard+'\')">Transferir</button>'+
+      '</div>'+
+    '</div>';
+
+  document.getElementById('transferOverlay').classList.add('open');
+}
+
+function closeTransferModal(){document.getElementById('transferOverlay').classList.remove('open')}
+
+function confirmTransfer(id,newBoard){
+  const t=tasks.find(x=>x.id===id);if(!t)return;
+  const assignee=document.getElementById('transferAssignee').value;
+  const deadline=document.getElementById('transferDeadline').value;
+  const comment=document.getElementById('transferComment').value.trim();
+
+  t.history.push({action:'Transferida de '+BOARDS[t.board]+' a '+BOARDS[newBoard],date:Date.now()});
+  if(comment){
+    if(!t.comments)t.comments=[];
+    t.comments.push({text:comment,date:Date.now(),author:t.assignee||'Sistema'});
+    t.history.push({action:'Comentario de transferencia',date:Date.now()});
+  }
+  t.board=newBoard;
+  t.status='todo';
+  if(assignee)t.assignee=assignee;
+  if(deadline)t.deadline=deadline;
+
+  save();
+  closeTransferModal();
+  switchTab(newBoard);
+  renderAll();
+  const list=document.getElementById('list-'+newBoard+'-todo');
+  const first=list.firstElementChild;
+  if(first)first.classList.add('new');
+}
+
 function transferTask(id,newBoard){
-  const t=tasks.find(x=>x.id===id);
-  if(t){t.history.push({action:'Transferida a '+BOARDS[newBoard],date:Date.now()});t.board=newBoard;t.status='todo';save();switchTab(newBoard);renderAll()}
+  openTransferModal(id,newBoard);
 }
 
 function addComment(id){
@@ -437,6 +515,30 @@ function addComment(id){
     t.comments.push({text,date:Date.now(),author:t.assignee||'Anónimo'});
     t.history.push({action:'Comentario agregado',date:Date.now()});
     save();openModal(id);renderAll();
+  }
+}
+
+function addCardComment(id){
+  const input=document.getElementById('cardComment-'+id);
+  if(!input)return;
+  const text=input.value.trim();
+  if(!text)return;
+  const t=tasks.find(x=>x.id===id);
+  if(t){
+    if(!t.comments)t.comments=[];
+    t.comments.push({text,date:Date.now(),author:t.assignee||'Anónimo'});
+    t.history.push({action:'Comentario agregado',date:Date.now()});
+    save();renderAll();
+  }
+}
+
+function updateProgress(id,val){
+  const t=tasks.find(x=>x.id===id);
+  if(t){
+    const old=t.progress||0;
+    t.progress=parseInt(val);
+    if(old!==t.progress)t.history.push({action:'Avance: '+old+'% → '+t.progress+'%',date:Date.now()});
+    save();renderAll();
   }
 }
 
@@ -506,11 +608,25 @@ function createCard(task){
   if(task.status==='done'){
     const others=Object.keys(BOARDS).filter(b=>b!==task.board);
     transfer='<div class="transfer-bar"><span>Transferir a:</span>';
-    others.forEach(b=>{transfer+='<button class="btn-transfer" onclick="event.stopPropagation();transferTask(\''+task.id+'\',\''+b+'\')">'+BOARDS[b]+'</button>'});
+    others.forEach(b=>{transfer+='<button class="btn-transfer" onclick="event.stopPropagation();openTransferModal(\''+task.id+'\',\''+b+'\')">'+BOARDS[b]+'</button>'});
     transfer+='<button class="btn-finish" onclick="event.stopPropagation();deleteTask(\''+task.id+'\')">Eliminar</button></div>';
   }
 
-  card.innerHTML='<div class="task-top-row"><span class="priority-badge '+priClass(task.priority)+'">'+task.priority+'</span><span class="task-title" onclick="event.stopPropagation();openModal(\''+task.id+'\')">'+esc(task.text)+'</span><div class="task-actions">'+act+'</div></div>'+tags+meta+hist+transfer;
+  let progressHTML='';
+  const prog=task.progress||0;
+  const progClass=prog>=100?'full':prog>=60?'high':prog>=30?'mid':'low';
+  let progOpts='';
+  for(let i=0;i<=100;i+=10){progOpts+='<option value="'+i+'"'+(i===prog?' selected':'')+'>'+i+'%</option>'}
+  progressHTML='<div class="progress-row">'+
+    '<div class="progress-bar-bg"><div class="progress-bar-fill '+progClass+'" style="width:'+prog+'%"></div></div>'+
+    '<select class="progress-select" onchange="event.stopPropagation();updateProgress(\''+task.id+'\',this.value)">'+progOpts+'</select>'+
+  '</div>';
+
+  let commentRow='<div class="card-comment-row">'+
+    '<input type="text" id="cardComment-'+task.id+'" placeholder="Agregar comentario..." onclick="event.stopPropagation()" onkeydown="if(event.key===\'Enter\'){event.stopPropagation();addCardComment(\''+task.id+'\')}">'+
+    '<button onclick="event.stopPropagation();addCardComment(\''+task.id+'\')">Enviar</button></div>';
+
+  card.innerHTML='<div class="task-top-row"><span class="priority-badge '+priClass(task.priority)+'">'+task.priority+'</span><span class="task-title" onclick="event.stopPropagation();openModal(\''+task.id+'\')">'+esc(task.text)+'</span><div class="task-actions">'+act+'</div></div>'+tags+meta+progressHTML+hist+commentRow+transfer;
   return card;
 }
 
@@ -533,7 +649,7 @@ function openModal(id){
 
   m.innerHTML='<button class="modal-close" onclick="closeModal()">&#10005;</button>'+
     '<div class="modal-title">'+esc(t.text)+'</div>'+
-    '<div class="modal-board">'+BOARDS[t.board]+' &middot; '+STATUS_LABELS[t.status]+'</div>'+
+    '<div class="modal-board">'+BOARDS[t.board]+' &middot; '+STATUS_LABELS[t.status]+' &middot; Avance: '+(t.progress||0)+'%</div>'+
     (tagsHTML?'<div class="modal-section">'+tagsHTML+'</div>':'')+
     '<div class="modal-section"><div class="modal-info">'+
       (t.assignee?'<span>'+pIcon()+' '+esc(t.assignee)+'</span>':'')+
@@ -622,9 +738,9 @@ function renderDashboard(){
 }
 
 function exportExcel(){
-  let csv='\uFEFF"Equipo","Tarea","Estado","Prioridad","Responsable","Plazo","Tags","Comentarios"\n';
+  let csv='\uFEFF"Equipo","Tarea","Estado","Avance","Prioridad","Responsable","Plazo","Tags","Comentarios"\n';
   tasks.forEach(t=>{
-    csv+='"'+BOARDS[t.board]+'","'+t.text.replace(/"/g,'""')+'","'+STATUS_LABELS[t.status]+'","'+t.priority+'","'+(t.assignee||'')+'","'+(t.deadline||'')+'","'+
+    csv+='"'+BOARDS[t.board]+'","'+t.text.replace(/"/g,'""')+'","'+STATUS_LABELS[t.status]+'","'+(t.progress||0)+'%","'+t.priority+'","'+(t.assignee||'')+'","'+(t.deadline||'')+'","'+
       (t.tags||[]).join(', ')+'","'+(t.comments||[]).map(c=>c.author+': '+c.text).join(' | ').replace(/"/g,'""')+'"\n';
   });
   const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});
@@ -641,7 +757,7 @@ function onDrop(e){
   if(draggedId&&ns){const t=tasks.find(x=>x.id===draggedId);if(t&&t.board===cb)moveTask(draggedId,ns)}
 }
 
-document.addEventListener('keydown',e=>{if(e.key==='Escape')closeModal()});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeModal();closeTransferModal()}});
 ['liquidos','alternativos','operaciones'].forEach(b=>{
   document.getElementById('taskInput-'+b).addEventListener('keydown',e=>{if(e.key==='Enter')addTask(b)});
 });
